@@ -100,14 +100,16 @@ class _SalidaNativa implements Salida {
   @override
   String get ayuda {
     final c = switch (_central.estado) {
-      'lista' => 'Este celular es la CENTRAL: los iPhone que abran el link en este Wi-Fi entran solos.',
-      'otra' => 'Ya hay otra central en este Wi-Fi: los iPhone se conectan a esa.',
+      'lista' => 'Este celular es la CENTRAL: los amigos escanean el QR (iPhone o Android) y entran solos, cada uno como un jugador aparte.',
+      'otra' => 'Ya hay otra central en este Wi-Fi: los amigos se conectan a esa.',
       'buscando' => 'Preparando la central…',
       _ => 'La central no pudo arrancar (¿hay internet?). Este control igual funciona.',
     };
     return 'En JADYX: Controles → Movimiento / DSU (cemuhook) → agrega el servidor\n'
         '   IP: $_ip   Puerto: $puertoDsu  (jugadores 1 a 4)\n'
-        '   IP: $_ip   Puerto: ${puertoDsu + 1}  (jugadores 5 a 8)\n\n$c\n\n'
+        '   IP: $_ip   Puerto: ${puertoDsu + 1}  (jugadores 5 a 8)\n'
+        'Después, en cada Jugador de JADYX elige su control DSU: este celular es el 1º '
+        'del primer servidor y los amigos llegan en orden (2º, 3º, 4º, y luego el segundo servidor).\n\n$c\n\n'
         'Celulares y Xbox en el mismo Wi-Fi. Deja la app abierta.';
   }
 

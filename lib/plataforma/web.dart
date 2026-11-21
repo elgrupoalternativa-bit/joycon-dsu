@@ -106,12 +106,13 @@ class _SalidaWeb implements Salida {
   String get ayuda =>
       'Estado: ${switch (_cliente.estado) {
         'conectado' => 'conectado a la central${_cliente.jugador != null ? ' como jugador ${_cliente.jugador}' : ''}.',
-        'sin-central' => 'no encuentro ningún Android con la app abierta en este Wi-Fi.',
+        'sin-central' => 'no encuentro la central (el celular con la app abierta) en este Wi-Fi.',
         'lleno' => 'la central ya tiene 8 jugadores.',
         _ => 'buscando la central…',
       }}\n\n'
       'Este control funciona por el link, sin instalar nada.\n\n'
-      'Necesita que en el mismo Wi-Fi haya un Android con la app Joy-Con DSU abierta '
-      '(esa es la central que le pasa tu control a la Xbox). Te conectas solo.\n\n'
+      'Necesita que en el mismo Wi-Fi esté la central: el celular del dueño de la consola '
+      'con la app Joy-Con DSU abierta. Ella le pasa tu control a la Xbox como un jugador '
+      'aparte. Te conectas solo.\n\n'
       'Pon el celular horizontal y deja esta página abierta mientras juegas.';
 }

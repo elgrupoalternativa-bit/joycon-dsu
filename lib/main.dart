@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'control_app.dart';
@@ -173,12 +174,66 @@ class _Estado extends StatelessWidget {
             const SizedBox(width: 6),
             const Icon(Icons.screen_rotation_alt_rounded, size: 15, color: Colors.orangeAccent),
           ],
+          if (!ControlApp.esWeb) ...[
+            const SizedBox(width: 10),
+            GestureDetector(
+              onTap: () => _mostrarQr(context),
+              child: const Icon(Icons.qr_code_2_rounded, size: 20, color: Colors.white),
+            ),
+          ],
           const SizedBox(width: 10),
           const Icon(Icons.settings_rounded, size: 18, color: Colors.white70),
         ]),
       ),
     );
   }
+}
+
+/// Link de la página que abren los amigos (iPhone o Android, sin instalar nada).
+const linkAmigos = 'https://elgrupoalternativa-bit.github.io/joycon-dsu/';
+
+class _Qr extends StatelessWidget {
+  const _Qr({this.tamano = 200});
+  final double tamano;
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
+      child: QrImageView(data: linkAmigos, size: tamano, backgroundColor: Colors.white),
+    );
+  }
+}
+
+void _mostrarQr(BuildContext context) {
+  showDialog<void>(
+    context: context,
+    builder: (context) => Dialog(
+      backgroundColor: const Color(0xFF17171A),
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: LayoutBuilder(builder: (context, c) {
+          final alto = MediaQuery.of(context).size.height;
+          return Row(mainAxisSize: MainAxisSize.min, children: [
+            _Qr(tamano: (alto - 120).clamp(140, 260)),
+            const SizedBox(width: 20),
+            const SizedBox(
+              width: 230,
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Únete a la partida', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+                SizedBox(height: 10),
+                Text('1. Conéctate a este mismo Wi-Fi.\n'
+                    '2. Escanea con la cámara.\n'
+                    '3. Toca «Empezar a jugar» y pon el celular horizontal.\n\n'
+                    'Cada celular entra como un jugador aparte.',
+                    style: TextStyle(color: Colors.white70, height: 1.4)),
+              ]),
+            ),
+          ]);
+        }),
+      ),
+    ),
+  );
 }
 
 void _abrirAjustes(BuildContext context, ControlApp app) {
@@ -239,6 +294,10 @@ class _Ajustes extends StatelessWidget {
             ),
             _titulo(ControlApp.esWeb ? 'Cómo funciona' : 'Conectar en JADYX'),
             Text(app.salida.ayuda, style: const TextStyle(color: Colors.white70, height: 1.4)),
+            if (!ControlApp.esWeb) ...[
+              _titulo('QR para tus amigos'),
+              const Align(alignment: Alignment.centerLeft, child: _Qr(tamano: 170)),
+            ],
             _titulo('Cómo quieres el control'),
             SegmentedButton<ModoControl>(
               segments: const [
