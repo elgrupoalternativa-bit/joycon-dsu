@@ -1,0 +1,51 @@
+# Compila la app de iPhone sin firmar (.ipa) en un Mac gratuito de GitHub.
+# SideStore la firma después en el propio iPhone con el Apple ID de cada persona.
+name: Compilar iPhone
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.50.1
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+      - run: flutter test
+
+      - name: Compilar sin firma
+        run: flutter build ios --release --no-codesign
+
+      - name: Empaquetar .ipa
+        run: |
+          mkdir -p Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qr JoyconDSU.ipa Payload
+          ls -lh JoyconDSU.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: JoyconDSU-ipa
+          path: JoyconDSU.ipa
+
+      # Deja siempre la última versión en un link fijo para mandar por WhatsApp:
+      # https://github.com/<usuario>/<repo>/releases/latest/download/JoyconDSU.ipa
+      - name: Publicar versión
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Joy-Con DSU v${{ github.run_number }}
+          files: JoyconDSU.ipa
+          make_latest: true
