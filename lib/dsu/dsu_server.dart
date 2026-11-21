@@ -33,35 +33,37 @@ class _Suscriptor {
 }
 
 class DsuServer {
-  DsuServer({required this.leerEstado, this.slot = 0});
+  DsuServer({required this.leerEstado, this.puerto = puertoDsu});
 
-  /// Cómo leer el estado actual del control (botones, palancas, sensores).
-  final ControlState Function() leerEstado;
+  /// Estado del control en cada ranura (0..3) de ESTE servidor, o null si en
+  /// esa ranura no hay nadie conectado.
+  final ControlState? Function(int ranura) leerEstado;
 
-  /// Ranura que anunciamos (0 = jugador 1 de ESTE servidor). Cada celular es su
-  /// propio servidor, así que casi siempre es 0.
-  final int slot;
+  /// 26760 = jugadores 1 a 4; 26761 = jugadores 5 a 8.
+  final int puerto;
 
   final int _idServidor = Random().nextInt(0x7fffffff);
   final Map<String, _Suscriptor> _suscriptores = {};
   RawDatagramSocket? _socket;
   Timer? _timer;
-  int _numeroPaquete = 0;
 
   /// Para mostrar en pantalla si el emulador está conectado.
   final ValueNotifierLite<int> conectados = ValueNotifierLite(0);
 
   // MAC falsa pero estable para este servidor.
-  late final Uint8List _mac = Uint8List.fromList([
-    0x4a, 0x4f, // "JO"
-    (_idServidor >> 24) & 0xff,
-    (_idServidor >> 16) & 0xff,
-    (_idServidor >> 8) & 0xff,
-    _idServidor & 0xff,
-  ]);
+  final List<int> _numeroPorRanura = [0, 0, 0, 0];
+
+  Uint8List _mac(int ranura) => Uint8List.fromList([
+        0x4a, // "J"
+        0x30 + ranura,
+        (_idServidor >> 24) & 0xff,
+        (_idServidor >> 16) & 0xff,
+        (_idServidor >> 8) & 0xff,
+        _idServidor & 0xff,
+      ]);
 
   Future<void> iniciar() async {
-    _socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, puertoDsu);
+    _socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, puerto);
     _socket!.listen((evento) {
       if (evento != RawSocketEvent.read) return;
       final dg = _socket!.receive();
@@ -102,7 +104,7 @@ class DsuServer {
         for (var i = 0; i < cantidad && 24 + i < d.length; i++) {
           final pedido = d[24 + i];
           final r = _nuevoPaquete(_msgInfo, 12);
-          _escribirCompartido(r, pedido, conectado: pedido == slot);
+          _escribirCompartido(r, pedido, conectado: pedido < 4 && leerEstado(pedido) != null);
           r.setUint8(31, 0);
           _enviar(r, dg.address, dg.port);
         }
@@ -128,17 +130,21 @@ class DsuServer {
     conectados.value = _suscriptores.length;
     if (_suscriptores.isEmpty) return;
 
-    final p = _paqueteDatos(leerEstado());
-    for (final s in _suscriptores.values) {
-      _enviar(p, s.direccion, s.puerto, yaFirmado: true);
+    for (var ranura = 0; ranura < 4; ranura++) {
+      final e = leerEstado(ranura);
+      if (e == null) continue;
+      final p = _paqueteDatos(ranura, e);
+      for (final s in _suscriptores.values) {
+        _enviar(p, s.direccion, s.puerto, yaFirmado: true);
+      }
     }
   }
 
-  ByteData _paqueteDatos(ControlState e) {
+  ByteData _paqueteDatos(int ranura, ControlState e) {
     final r = _nuevoPaquete(_msgDatos, 80);
-    _escribirCompartido(r, slot, conectado: true); // bytes 20..30
+    _escribirCompartido(r, ranura, conectado: true); // bytes 20..30
     r.setUint8(31, 1); // conectado
-    r.setUint32(32, _numeroPaquete++, Endian.little);
+    r.setUint32(32, _numeroPorRanura[ranura]++, Endian.little);
 
     // Botones 1 (estilo DS4): cruceta, +/−, palancas presionadas.
     var b1 = 0;
@@ -223,8 +229,9 @@ class DsuServer {
     r.setUint8(21, conectado ? 2 : 0); // 2 = conectado
     r.setUint8(22, conectado ? 2 : 0); // 2 = giroscopio completo
     r.setUint8(23, conectado ? 2 : 0); // 2 = bluetooth
+    final mac = _mac(ranura & 3);
     for (var i = 0; i < 6; i++) {
-      r.setUint8(24 + i, conectado ? _mac[i] : 0);
+      r.setUint8(24 + i, conectado ? mac[i] : 0);
     }
     r.setUint8(30, conectado ? 0x05 : 0x00); // batería llena
   }

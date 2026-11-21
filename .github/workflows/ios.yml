@@ -1,6 +1,13 @@
-# Compila la app de iPhone sin firmar (.ipa) en un Mac gratuito de GitHub.
-# SideStore la firma después en el propio iPhone con el Apple ID de cada persona.
-name: Compilar iPhone
+# Compila y publica todo con cada cambio:
+#  - Página web (para iPhone, sin instalar)  → GitHub Pages
+#  - APK de Android                          → Releases
+#  - .ipa de iPhone (sin firmar, SideStore)  → Releases
+#
+# Links fijos para mandar por WhatsApp:
+#  https://elgrupoalternativa-bit.github.io/joycon-dsu/
+#  https://github.com/elgrupoalternativa-bit/joycon-dsu/releases/latest/download/JoyconDSU.apk
+#  https://github.com/elgrupoalternativa-bit/joycon-dsu/releases/latest/download/JoyconDSU.ipa
+name: Compilar y publicar
 
 on:
   push:
@@ -9,43 +16,89 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: publicar
+  cancel-in-progress: true
 
 jobs:
-  ios:
-    runs-on: macos-latest
+  pruebas-web-android:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: 3.50.1
           channel: stable
           cache: true
-
       - run: flutter pub get
       - run: flutter test
 
+      - name: Página web
+        run: flutter build web --release --base-href /joycon-dsu/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+      - name: APK de Android
+        run: |
+          flutter build apk --release
+          cp build/app/outputs/flutter-apk/app-release.apk JoyconDSU.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: JoyconDSU.apk
+
+  pagina:
+    needs: pruebas-web-android
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.50.1
+          channel: stable
+          cache: true
+      - run: flutter pub get
       - name: Compilar sin firma
         run: flutter build ios --release --no-codesign
-
       - name: Empaquetar .ipa
         run: |
           mkdir -p Payload
           cp -R build/ios/iphoneos/Runner.app Payload/
           zip -qr JoyconDSU.ipa Payload
-          ls -lh JoyconDSU.ipa
-
       - uses: actions/upload-artifact@v4
         with:
-          name: JoyconDSU-ipa
+          name: ipa
           path: JoyconDSU.ipa
 
-      # Deja siempre la última versión en un link fijo para mandar por WhatsApp:
-      # https://github.com/<usuario>/<repo>/releases/latest/download/JoyconDSU.ipa
-      - name: Publicar versión
-        uses: softprops/action-gh-release@v2
+  publicar:
+    needs: [pruebas-web-android, ios]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
         with:
-          tag_name: v${{ github.run_number }}
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}-${{ github.run_attempt }}
           name: Joy-Con DSU v${{ github.run_number }}
-          files: JoyconDSU.ipa
+          files: |
+            JoyconDSU.apk
+            JoyconDSU.ipa
           make_latest: true

@@ -1,13 +1,13 @@
-// El "cerebro" de la app: junta los sensores, los toques y el servidor DSU.
+// El "cerebro" de la app: junta los sensores, los toques y la salida
+// (directo a la Xbox en la app, o hacia la central en la página web).
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:sensors_plus/sensors_plus.dart';
 
 import 'dsu/control_state.dart';
-import 'dsu/dsu_server.dart';
+import 'plataforma/comun.dart';
+import 'plataforma/plataforma.dart' as plataforma;
 
 enum ModoControl { dosJoycon, joyconIzquierdo, joyconDerecho }
 
@@ -39,69 +39,58 @@ class AjustesMovimiento {
 
 class ControlApp extends ChangeNotifier {
   ControlApp() {
-    _servidor = DsuServer(leerEstado: () => estado);
-    _servidor.conectados.addListener(notifyListeners);
+    salida = plataforma.crearSalida(leer: () => estado, alCambiar: notifyListeners, reloj: _reloj);
   }
+
+  static const esWeb = plataforma.esWeb;
 
   final ControlState estado = ControlState();
   final AjustesMovimiento movimiento = AjustesMovimiento();
-  late final DsuServer _servidor;
+  late final Salida salida;
 
   ModoControl modo = ModoControl.dosJoycon;
   int colorIzq = coloresJoycon[1].valor; // azul a la izquierda, como el Switch
   int colorDer = coloresJoycon[0].valor; // rojo a la derecha
-  String ip = 'buscando…';
-  String? error;
 
-  int get emuladoresConectados => _servidor.conectados.value;
+  /// En la web hay que tocar un botón antes de arrancar (permiso de movimiento).
+  bool arrancado = false;
+  bool sinMovimiento = false;
 
-  final _subs = <StreamSubscription<dynamic>>[];
   final _reloj = Stopwatch()..start();
+  StreamSubscription<Movimiento>? _sub;
 
-  Future<void> iniciar() async {
-    try {
-      await _servidor.iniciar();
-    } catch (e) {
-      error = 'No se pudo abrir el puerto $puertoDsu: $e';
-    }
-    _subs.add(
-      accelerometerEventStream(samplingPeriod: SensorInterval.gameInterval).listen(_alAcelerar),
-    );
-    _subs.add(
-      gyroscopeEventStream(samplingPeriod: SensorInterval.gameInterval).listen(_alGirar),
-    );
-    ip = await _buscarIp();
+  /// En la app arranca solo; en la web, al tocar "Empezar".
+  Future<void> arrancar() async {
+    if (arrancado) return;
+    // Si el navegador nunca contesta, seguimos igual (sin giroscopio).
+    final permiso = await plataforma
+        .pedirPermisoMovimiento()
+        .timeout(const Duration(seconds: 8), onTimeout: () => false);
+    sinMovimiento = !permiso;
+    _sub = plataforma.movimientos().listen(_alMover);
+    arrancado = true;
+    notifyListeners();
+    await salida.iniciar();
     notifyListeners();
   }
 
   @override
   void dispose() {
-    for (final s in _subs) {
-      s.cancel();
-    }
-    _servidor.detener();
+    _sub?.cancel();
+    salida.detener();
     super.dispose();
   }
 
-  // El celular va acostado (horizontal) con la parte de arriba hacia la
-  // izquierda. Ejes del teléfono (vertical): X a la derecha, Y hacia arriba,
-  // Z saliendo de la pantalla. Ejes DSU: X derecha, Y arriba, Z hacia el jugador.
-  //   DSU X = −teléfono Y,  DSU Y = teléfono Z,  DSU Z = −teléfono X
-  void _alAcelerar(AccelerometerEvent e) {
-    const g = 9.80665;
-    estado.accelX = -e.y / g;
-    estado.accelY = e.z / g;
-    estado.accelZ = -e.x / g;
-    estado.tiempoMicros = _reloj.elapsedMicroseconds;
-  }
-
-  void _alGirar(GyroscopeEvent e) {
-    const aGrados = 57.29577951308232;
-    final s = movimiento.sensibilidad * aGrados;
-    estado.gyroPitch = -e.y * s * (movimiento.invertirPitch ? -1 : 1);
-    estado.gyroYaw = e.z * s * (movimiento.invertirYaw ? -1 : 1);
-    estado.gyroRoll = -e.x * s * (movimiento.invertirRoll ? -1 : 1);
-    estado.tiempoMicros = _reloj.elapsedMicroseconds;
+  void _alMover(Movimiento m) {
+    final s = movimiento.sensibilidad;
+    estado
+      ..accelX = m.ax
+      ..accelY = m.ay
+      ..accelZ = m.az
+      ..gyroPitch = m.pitch * s * (movimiento.invertirPitch ? -1 : 1)
+      ..gyroYaw = m.yaw * s * (movimiento.invertirYaw ? -1 : 1)
+      ..gyroRoll = m.roll * s * (movimiento.invertirRoll ? -1 : 1)
+      ..tiempoMicros = _reloj.elapsedMicroseconds;
   }
 
   // ----------------------------------------------------------------- toques
@@ -157,27 +146,4 @@ class ControlApp extends ChangeNotifier {
   }
 
   void avisar() => notifyListeners();
-
-  Future<String> _buscarIp() async {
-    try {
-      final interfaces = await NetworkInterface.list(type: InternetAddressType.IPv4);
-      // Primero el Wi-Fi (en0 en iPhone, wlan0 en Android).
-      for (final nombre in ['en0', 'wlan0']) {
-        for (final i in interfaces) {
-          if (i.name == nombre && i.addresses.isNotEmpty) return i.addresses.first.address;
-        }
-      }
-      for (final i in interfaces) {
-        for (final a in i.addresses) {
-          if (!a.isLoopback && a.address.startsWith('192.168.')) return a.address;
-        }
-      }
-      for (final i in interfaces) {
-        for (final a in i.addresses) {
-          if (!a.isLoopback) return a.address;
-        }
-      }
-    } catch (_) {}
-    return 'sin Wi-Fi';
-  }
 }

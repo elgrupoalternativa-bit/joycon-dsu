@@ -1,18 +1,21 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'control_app.dart';
-import 'dsu/dsu_server.dart';
 import 'ui/joycons.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft]);
-  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-  WakelockPlus.enable(); // que la pantalla no se apague mientras juegas
   final app = ControlApp();
-  await app.iniciar();
+  if (!ControlApp.esWeb) {
+    await SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft]);
+    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    WakelockPlus.enable(); // que la pantalla no se apague mientras juegas
+    unawaited(app.arrancar());
+  }
   runApp(JoyconDsuApp(app: app));
 }
 
@@ -55,10 +58,13 @@ class PantallaControl extends StatelessWidget {
             ModoControl.joyconIzquierdo => JoyconDeLado(app: app, izquierdo: true),
             ModoControl.joyconDerecho => JoyconDeLado(app: app, izquierdo: false),
           };
+          final vertical = MediaQuery.of(context).orientation == Orientation.portrait;
           return SafeArea(
             child: Stack(children: [
               Padding(padding: const EdgeInsets.all(6), child: control),
               Align(alignment: Alignment.topCenter, child: _Estado(app: app)),
+              if (!app.arrancado) _Empezar(app: app),
+              if (app.arrancado && vertical && ControlApp.esWeb) const _Gira(),
             ]),
           );
         },
@@ -84,19 +90,76 @@ class _Pantallita extends StatelessWidget {
   }
 }
 
-/// Píldora de arriba: IP del celular, si la Xbox está conectada y ajustes.
+/// Pantalla inicial de la página web: Safari exige un toque para dar permiso
+/// al giroscopio.
+class _Empezar extends StatelessWidget {
+  const _Empezar({required this.app});
+  final ControlApp app;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: const Color(0xF20E0E10),
+      alignment: Alignment.center,
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Row(mainAxisSize: MainAxisSize.min, children: [
+          Container(width: 34, height: 70, decoration: BoxDecoration(color: Color(app.colorIzq), borderRadius: const BorderRadius.horizontal(left: Radius.circular(30), right: Radius.circular(6)))),
+          const SizedBox(width: 6),
+          Container(width: 34, height: 70, decoration: BoxDecoration(color: Color(app.colorDer), borderRadius: const BorderRadius.horizontal(right: Radius.circular(30), left: Radius.circular(6)))),
+        ]),
+        const SizedBox(height: 18),
+        const Text('Joy-Con DSU', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900)),
+        const SizedBox(height: 6),
+        const Text('Tu celular como control, con movimiento', style: TextStyle(color: Colors.white70)),
+        const SizedBox(height: 22),
+        FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFFE60012),
+            padding: const EdgeInsets.symmetric(horizontal: 34, vertical: 18),
+            textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          ),
+          onPressed: app.arrancar,
+          icon: const Icon(Icons.sports_esports_rounded),
+          label: const Text('Empezar a jugar'),
+        ),
+        const SizedBox(height: 12),
+        const Text('Te va a pedir permiso de movimiento: dale Permitir.', style: TextStyle(color: Colors.white54, fontSize: 13)),
+      ]),
+    );
+  }
+}
+
+class _Gira extends StatelessWidget {
+  const _Gira();
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: const Color(0xF20E0E10),
+      alignment: Alignment.center,
+      child: const Column(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.screen_rotation_rounded, size: 64),
+        SizedBox(height: 14),
+        Text('Pon el celular horizontal', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+        SizedBox(height: 6),
+        Text('Si no gira: quita el bloqueo de rotación en el Centro de control', style: TextStyle(color: Colors.white60)),
+      ]),
+    );
+  }
+}
+
+/// Píldora de arriba: estado de la conexión y ajustes.
 class _Estado extends StatelessWidget {
   const _Estado({required this.app});
   final ControlApp app;
 
   @override
   Widget build(BuildContext context) {
-    final conectado = app.emuladoresConectados > 0;
+    final conectado = app.salida.ok;
     return GestureDetector(
       onTap: () => _abrirAjustes(context, app),
       child: Container(
-        margin: const EdgeInsets.only(top: 6),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        margin: const EdgeInsets.only(top: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
           color: Colors.black.withValues(alpha: 0.75),
           borderRadius: BorderRadius.circular(30),
@@ -105,10 +168,11 @@ class _Estado extends StatelessWidget {
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(Icons.circle, size: 10, color: conectado ? const Color(0xFF1EDC00) : Colors.orangeAccent),
           const SizedBox(width: 8),
-          Text(
-            app.error ?? (conectado ? 'Conectado a la Xbox' : 'Esperando la Xbox · ${app.ip}:$puertoDsu'),
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-          ),
+          Text(app.salida.texto, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          if (app.sinMovimiento) ...[
+            const SizedBox(width: 6),
+            const Icon(Icons.screen_rotation_alt_rounded, size: 15, color: Colors.orangeAccent),
+          ],
           const SizedBox(width: 10),
           const Icon(Icons.settings_rounded, size: 18, color: Colors.white70),
         ]),
@@ -173,13 +237,8 @@ class _Ajustes extends StatelessWidget {
             Center(
               child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
             ),
-            _titulo('Conectar en JADYX'),
-            Text(
-              'En el emulador: Controles → Movimiento / DSU (cemuhook) → agrega el servidor:\n'
-              '   IP: ${app.ip}     Puerto: $puertoDsu\n'
-              'Celular y Xbox tienen que estar en el mismo Wi-Fi. Deja esta app abierta y la pantalla prendida.',
-              style: const TextStyle(color: Colors.white70, height: 1.4),
-            ),
+            _titulo(ControlApp.esWeb ? 'Cómo funciona' : 'Conectar en JADYX'),
+            Text(app.salida.ayuda, style: const TextStyle(color: Colors.white70, height: 1.4)),
             _titulo('Cómo quieres el control'),
             SegmentedButton<ModoControl>(
               segments: const [

@@ -43,8 +43,10 @@ class JoyconIzquierdo extends StatelessWidget {
       color: Color(app.colorIzq),
       izquierdo: true,
       child: LayoutBuilder(builder: (context, c) {
-        final palanca = (c.maxHeight * 0.36).clamp(110.0, 170.0);
-        final boton = (c.maxHeight * 0.13).clamp(44.0, 64.0);
+        // Alto que queda para palanca + botones, quitando gatillos y filas chicas.
+        final libre = c.maxHeight - 44 - 6 - 38 - 8 - 34 - 26;
+        final palanca = (libre * 0.47).clamp(80.0, 170.0);
+        final boton = (libre * 0.5 / 2.9).clamp(30.0, 64.0);
         return Padding(
           padding: const EdgeInsets.fromLTRB(28, 8, 14, 10),
           child: Column(
@@ -104,8 +106,10 @@ class JoyconDerecho extends StatelessWidget {
       color: Color(app.colorDer),
       izquierdo: false,
       child: LayoutBuilder(builder: (context, c) {
-        final palanca = (c.maxHeight * 0.36).clamp(110.0, 170.0);
-        final boton = (c.maxHeight * 0.13).clamp(44.0, 64.0);
+        // Alto que queda para palanca + botones, quitando gatillos y filas chicas.
+        final libre = c.maxHeight - 44 - 6 - 38 - 8 - 34 - 26;
+        final palanca = (libre * 0.47).clamp(80.0, 170.0);
+        final boton = (libre * 0.5 / 2.9).clamp(30.0, 64.0);
         return Padding(
           padding: const EdgeInsets.fromLTRB(14, 8, 28, 10),
           child: Column(

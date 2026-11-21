@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -47,7 +46,9 @@ void main() {
       ..izqY = 1.0 // palanca izquierda totalmente ARRIBA
       ..gyroYaw = 90.0
       ..accelY = 1.0;
-    final srv = DsuServer(leerEstado: () => estado);
+    // Ranura 0 = este celular; la 2 = un iPhone por el link; 1 y 3 vacías.
+    final remoto = ControlState()..b = true;
+    final srv = DsuServer(leerEstado: (r) => r == 0 ? estado : (r == 2 ? remoto : null));
     await srv.iniciar();
 
     final cli = await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, 0);
@@ -75,7 +76,10 @@ void main() {
 
     final datos = recibidos.where((p) => ByteData.sublistView(p).getUint32(16, Endian.little) == 0x100002).toList();
     expect(datos.length, greaterThan(5), reason: 'debe mandar a ~60 Hz');
-    final p = datos.last;
+    expect(datos.where((p) => p[20] == 1 || p[20] == 3), isEmpty, reason: 'ranuras vacías no mandan');
+    final delRemoto = datos.lastWhere((p) => p[20] == 2);
+    expect(delRemoto[37] & 0x40, 0x40, reason: 'el iPhone en la ranura 2 tiene B presionado');
+    final p = datos.lastWhere((p) => p[20] == 0);
     final bd = ByteData.sublistView(p);
     expect(p.length, 100);
     expect(String.fromCharCodes(p.sublist(0, 4)), 'DSUS');
