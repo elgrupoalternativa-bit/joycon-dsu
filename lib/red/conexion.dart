@@ -71,22 +71,64 @@ class Central {
     return null;
   }
 
+  Timer? _reconexion;
+  bool _detenida = false;
+
+  /// Último error al atender a un celular (se muestra en la ayuda).
+  String? ultimoError;
+
   Future<void> iniciar() async {
+    _limpieza ??= Timer.periodic(const Duration(seconds: 2), (_) => _limpiar());
+    await _registrar();
+  }
+
+  /// Se registra en el mensajero y NO se rinde: si el nombre aparece ocupado
+  /// (casi siempre es nuestro propio registro viejo, de antes de reinstalar o
+  /// de cuando la app quedó en segundo plano) o se cae la conexión, reintenta
+  /// cada pocos segundos hasta quedar lista.
+  Future<void> _registrar() async {
+    _reconexion?.cancel();
+    if (_detenida) return;
+    final viejo = _senal;
+    _senal = null; // así su aviso de "cerrado" no dispara otra reconexión
+    await viejo?.cerrar();
     try {
       final nombre = await nombreCentral();
       final s = Senal(nombre);
       _senal = s;
-      s.mensajes.listen(_alMensaje);
+      s.mensajes.listen((m) {
+        if (m.tipo == 'CLOSE' && identical(_senal, s)) {
+          estado = 'buscando';
+          alCambiar();
+          _reintentar(3);
+          return;
+        }
+        _alMensaje(m);
+      });
       final r = await s.conectar();
       estado = r == 'OPEN' ? 'lista' : (r == 'ID-TAKEN' ? 'otra' : 'error');
     } catch (_) {
       estado = 'error';
     }
-    _limpieza = Timer.periodic(const Duration(seconds: 2), (_) => _limpiar());
     alCambiar();
+    if (estado != 'lista') _reintentar(estado == 'otra' ? 6 : 4);
+  }
+
+  void _reintentar(int segundos) {
+    _reconexion?.cancel();
+    if (_detenida) return;
+    _reconexion = Timer(Duration(seconds: segundos), _registrar);
+  }
+
+  /// Al volver a la app (después de bloquear el celular o cambiar de app) el
+  /// mensajero suele estar caído: lo revisamos y reconectamos.
+  void revisar({bool forzar = false}) {
+    if (forzar || estado != 'lista') _registrar();
   }
 
   Future<void> detener() async {
+    _detenida = true;
+    _reconexion?.cancel();
     _limpieza?.cancel();
     for (final r in _remotos.values) {
       await r.pc.close();
@@ -116,6 +158,15 @@ class Central {
   }
 
   Future<void> _alMensaje(Mensaje m) async {
+    try {
+      await _atender(m);
+    } catch (e) {
+      ultimoError = '$e';
+      alCambiar();
+    }
+  }
+
+  Future<void> _atender(Mensaje m) async {
     final origen = m.origen;
     if (origen == null || m.datos == null) return;
     final s = _senal!;

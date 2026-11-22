@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/widgets.dart' show AppLifecycleListener;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sensors_plus/sensors_plus.dart';
@@ -94,7 +95,20 @@ class _SalidaNativa implements Salida {
     // Puerto 26761: jugadores 5 a 8.
     _dsu2 = DsuServer(puerto: puertoDsu + 1, leerEstado: (r) => _central.jugador(r + 4));
     _dsu1.conectados.addListener(_alCambiar);
+    // iOS congela la conexión cuando la app sale de la pantalla. Al volver,
+    // si estuvo fuera más de unos segundos, la central se registra de nuevo.
+    _ciclo = AppLifecycleListener(
+      onPause: () => _fuera = DateTime.now(),
+      onResume: () {
+        final f = _fuera;
+        _central.revisar(forzar: f != null && DateTime.now().difference(f).inSeconds > 8);
+        _fuera = null;
+      },
+    );
   }
+
+  late final AppLifecycleListener _ciclo;
+  DateTime? _fuera;
 
   final ControlState Function() _leer;
   final void Function() _alCambiar;
@@ -136,6 +150,7 @@ class _SalidaNativa implements Salida {
 
   @override
   Future<void> detener() async {
+    _ciclo.dispose();
     await _dsu1.detener();
     await _dsu2.detener();
     await _central.detener();
@@ -156,10 +171,10 @@ class _SalidaNativa implements Salida {
   String get ayuda {
     final c = switch (_central.estado) {
       'lista' => 'Este celular es la CENTRAL: los amigos escanean el QR (iPhone o Android) y entran solos, cada uno como un jugador aparte.',
-      'otra' => 'Ya hay otra central en este Wi-Fi: los amigos se conectan a esa.',
+      'otra' => 'Reconectando la central… (el registro anterior tarda hasta un minuto en soltarse; si hay otro celular con la app abierta en este Wi-Fi, ciérrala allá).',
       'buscando' => 'Preparando la central…',
-      _ => 'La central no pudo arrancar (¿hay internet?). Este control igual funciona.',
-    };
+      _ => 'La central no pudo arrancar (¿hay internet?). Reintentando… Este control igual funciona.',
+    } + (_central.ultimoError == null ? '' : '\n(Último error con un amigo: ${_central.ultimoError})');
     return 'En JADYX: Controles → Movimiento / DSU (cemuhook) → agrega el servidor\n'
         '   IP: $_ip   Puerto: $puertoDsu  (jugadores 1 a 4)\n'
         '   IP: $_ip   Puerto: ${puertoDsu + 1}  (jugadores 5 a 8)\n'
