@@ -19,12 +19,22 @@ const _servidor = 'wss://0.peerjs.com/peerjs';
 Future<String> nombreCentral({String sala = ''}) async {
   final ip = (await http.get(Uri.parse('https://api.ipify.org'))).body.trim();
   // FNV-1a de 32 bits: corto y suficiente para separar redes.
+  return 'joycondsu-${fnv1a32('joycon-dsu|$ip|$sala').toRadixString(36)}';
+}
+
+/// FNV-1a de 32 bits que da EXACTAMENTE lo mismo en la app y en la página web.
+/// Ojo: en la web los enteros son números de JavaScript y `h * 0x01000193`
+/// pasa de 2^53 y pierde precisión: la página calculaba otro nombre y nunca
+/// encontraba a la central (21-nov-2026). Por eso se multiplica por partes:
+/// 0x01000193 = 2^24 + 0x193, y módulo 2^32 solo importa el byte bajo de h
+/// en la parte de 2^24.
+int fnv1a32(String texto) {
   var h = 0x811c9dc5;
-  for (final c in utf8.encode('joycon-dsu|$ip|$sala')) {
-    h ^= c;
-    h = (h * 0x01000193) & 0xffffffff;
+  for (final c in utf8.encode(texto)) {
+    h = (h ^ c) & 0xffffffff;
+    h = ((((h & 0xff) << 24) & 0xffffffff) + h * 0x193) % 0x100000000;
   }
-  return 'joycondsu-${h.toRadixString(36)}';
+  return h;
 }
 
 String idAleatorio(String prefijo) {
