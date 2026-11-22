@@ -177,14 +177,6 @@ class Central {
       _remotos[origen]?.pc.close();
       _remotos[origen] = r;
 
-      pc.onIceCandidate = (c) {
-        if (c.candidate == null) return;
-        s.enviar('CANDIDATE', origen, {
-          'candidate': c.candidate,
-          'sdpMid': c.sdpMid,
-          'sdpMLineIndex': c.sdpMLineIndex,
-        });
-      };
       pc.onDataChannel = (canal) {
         if (canal.label == 'fotos') {
           r.canalFotos = canal;
@@ -213,19 +205,24 @@ class Central {
       };
 
       await pc.setRemoteDescription(RTCSessionDescription(m.datos!['sdp'] as String, 'offer'));
-      final respuesta = await pc.createAnswer();
-      await pc.setLocalDescription(respuesta);
-      s.enviar('ANSWER', origen, {'sdp': respuesta.sdp, 'type': 'answer'});
-    } else if (m.tipo == 'CANDIDATE') {
-      final r = _remotos[origen];
-      if (r == null) return;
-      await r.pc.addCandidate(RTCIceCandidate(
-        m.datos!['candidate'] as String?,
-        m.datos!['sdpMid'] as String?,
-        (m.datos!['sdpMLineIndex'] as num?)?.toInt(),
-      ));
+      await pc.setLocalDescription(await pc.createAnswer());
+      // Un solo mensaje con todas las rutas ya incluidas (sin goteo de candidatos).
+      await s.enviar('ANSWER', origen, {'sdp': await sdpCompleto(pc), 'type': 'answer'});
     }
   }
+}
+
+/// Espera a que el celular junte sus rutas de red (ICE) y devuelve el SDP con
+/// todas adentro, para mandarlo en UN solo mensaje por el mensajero.
+Future<String> sdpCompleto(RTCPeerConnection pc) async {
+  final listo = Completer<void>();
+  pc.onIceGatheringState = (st) {
+    if (st == RTCIceGatheringState.RTCIceGatheringStateComplete && !listo.isCompleted) listo.complete();
+  };
+  if (pc.iceGatheringState == RTCIceGatheringState.RTCIceGatheringStateComplete) return (await pc.getLocalDescription())!.sdp!;
+  // En la misma red las rutas locales salen al instante; no esperar de más.
+  await listo.future.timeout(const Duration(milliseconds: 2500), onTimeout: () {});
+  return (await pc.getLocalDescription())!.sdp!;
 }
 
 // =============================================================== CLIENTE
@@ -312,14 +309,6 @@ class Cliente {
           alCambiar();
         }
       };
-      pc.onIceCandidate = (c) {
-        if (c.candidate == null) return;
-        s.enviar('CANDIDATE', central, {
-          'candidate': c.candidate,
-          'sdpMid': c.sdpMid,
-          'sdpMLineIndex': c.sdpMLineIndex,
-        });
-      };
       pc.onConnectionState = (st) {
         if (st == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
           _poner('error');
@@ -331,23 +320,13 @@ class Cliente {
         if (m.origen != central) return;
         if (m.tipo == 'ANSWER' && m.datos != null) {
           await pc.setRemoteDescription(RTCSessionDescription(m.datos!['sdp'] as String, 'answer'));
-        } else if (m.tipo == 'CANDIDATE' && m.datos != null) {
-          await pc.addCandidate(RTCIceCandidate(
-            m.datos!['candidate'] as String?,
-            m.datos!['sdpMid'] as String?,
-            (m.datos!['sdpMLineIndex'] as num?)?.toInt(),
-          ));
-        } else if (m.tipo == 'EXPIRE') {
-          // La central no está prendida en esta red.
-          _poner('sin-central');
-          _reintentarEn(4);
         }
       });
 
       _poner('conectando');
-      final oferta = await pc.createOffer();
-      await pc.setLocalDescription(oferta);
-      s.enviar('OFFER', central, {'sdp': oferta.sdp, 'type': 'data'});
+      await pc.setLocalDescription(await pc.createOffer());
+      // Un solo mensaje con todas las rutas ya incluidas (sin goteo de candidatos).
+      await s.enviar('OFFER', central, {'sdp': await sdpCompleto(pc), 'type': 'data'});
 
       // Si en 12 s no abrió, volver a intentar.
       _reintento = Timer(const Duration(seconds: 12), () {
