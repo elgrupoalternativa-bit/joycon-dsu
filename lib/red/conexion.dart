@@ -263,17 +263,70 @@ class Cliente {
     alCambiar();
   }
 
+  /// Un solo buzón por celular, para no crear "temas" nuevos en ntfy en cada
+  /// intento (ntfy limita por casa: lo medimos el 21-nov-2026 con un 429).
+  final String _miBuzon = idAleatorio('jugador');
+  String? _central;
+  int _intentos = 0;
+  bool _ocupado = false;
+
+  /// Espera entre intentos: cada vez más largo, para no gastar el cupo de la casa.
+  static const _esperas = [6, 10, 20, 30, 60];
+
+  /// Tras ~5 min sin central deja de buscar solo ('pausado'). Cualquier botón
+  /// que toque el jugador la despierta.
+  void despertar() {
+    if (estado == 'pausado') {
+      _intentos = 0;
+      _intentar();
+    }
+  }
+
+  void _siguiente() {
+    if (estado == 'conectado') return;
+    _intentos++;
+    if (_intentos > 9) {
+      _poner('pausado');
+      return;
+    }
+    _reintentarEn(_esperas[(_intentos - 1).clamp(0, _esperas.length - 1)]);
+  }
+
+  /// Se conecta al buzón propio una sola vez (y otra vez solo si se cayó).
+  Future<Senal?> _buzon() async {
+    final actual = _senal;
+    if (actual != null) return actual;
+    final s = Senal(_miBuzon);
+    if (await s.conectar() != 'OPEN') return null;
+    _senal = s;
+    s.mensajes.listen((m) async {
+      if (m.tipo == 'CLOSE') {
+        if (identical(_senal, s)) _senal = null;
+        return;
+      }
+      if (m.origen != _central || m.tipo != 'ANSWER' || m.datos == null) return;
+      final pc = _pc;
+      if (pc == null) return;
+      try {
+        await pc.setRemoteDescription(RTCSessionDescription(m.datos!['sdp'] as String, 'answer'));
+      } catch (_) {
+        // Respuesta repetida o de un intento viejo: se ignora.
+      }
+    });
+    return s;
+  }
+
   Future<void> _intentar() async {
     _reintento?.cancel();
+    if (_ocupado) return;
+    _ocupado = true;
     try {
       _poner('buscando');
-      final central = await nombreCentral();
-      await _senal?.cerrar();
-      final s = Senal(idAleatorio('jugador'));
-      _senal = s;
-      if (await s.conectar() != 'OPEN') {
+      final central = _central ??= await nombreCentral();
+      final s = await _buzon();
+      if (s == null) {
         _poner('error');
-        _reintentarEn(4);
+        _siguiente();
         return;
       }
 
@@ -292,8 +345,10 @@ class Cliente {
 
       canal.onDataChannelState = (st) {
         if (st == RTCDataChannelState.RTCDataChannelOpen) {
+          _intentos = 0;
+          _reintento?.cancel();
           _poner('conectado');
-        } else if (st == RTCDataChannelState.RTCDataChannelClosed) {
+        } else if (st == RTCDataChannelState.RTCDataChannelClosed && identical(_canal, canal)) {
           jugador = null;
           _poner('buscando');
           _reintentarEn(2);
@@ -310,34 +365,29 @@ class Cliente {
         }
       };
       pc.onConnectionState = (st) {
-        if (st == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
+        if (st == RTCPeerConnectionState.RTCPeerConnectionStateFailed && identical(_pc, pc)) {
           _poner('error');
-          _reintentarEn(3);
+          _siguiente();
         }
       };
-
-      s.mensajes.listen((m) async {
-        if (m.origen != central) return;
-        if (m.tipo == 'ANSWER' && m.datos != null) {
-          await pc.setRemoteDescription(RTCSessionDescription(m.datos!['sdp'] as String, 'answer'));
-        }
-      });
 
       _poner('conectando');
       await pc.setLocalDescription(await pc.createOffer());
       // Un solo mensaje con todas las rutas ya incluidas (sin goteo de candidatos).
       await s.enviar('OFFER', central, {'sdp': await sdpCompleto(pc), 'type': 'data'});
 
-      // Si en 12 s no abrió, volver a intentar.
-      _reintento = Timer(const Duration(seconds: 12), () {
+      // Si en 8 s no abrió, la central no está (o no contestó): esperar y reintentar.
+      _reintento = Timer(const Duration(seconds: 8), () {
         if (estado != 'conectado') {
           _poner('sin-central');
-          _intentar();
+          _siguiente();
         }
       });
     } catch (_) {
       _poner('error');
-      _reintentarEn(4);
+      _siguiente();
+    } finally {
+      _ocupado = false;
     }
   }
 

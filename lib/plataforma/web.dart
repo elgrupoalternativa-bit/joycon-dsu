@@ -97,6 +97,9 @@ class _SalidaWeb implements Salida {
   Stream<Uint8List> fotos() => _cliente.pedirFotos();
 
   @override
+  void despertar() => _cliente.despertar();
+
+  @override
   bool get editaFotos => false;
 
   @override
@@ -112,6 +115,7 @@ class _SalidaWeb implements Salida {
         'sin-central' => 'Sin central',
         'lleno' => 'Ya hay 8',
         'error' => 'Reintentando…',
+        'pausado' => 'Sin central · toca un botón',
         _ => 'Buscando…',
       };
 

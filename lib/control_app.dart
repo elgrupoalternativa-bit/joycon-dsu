@@ -116,7 +116,10 @@ class ControlApp extends ChangeNotifier {
       case '←': estado.izquierda = presionado;
       case '→': estado.derecha = presionado;
     }
-    if (presionado) HapticFeedback.lightImpact();
+    if (presionado) {
+      HapticFeedback.lightImpact();
+      salida.despertar();
+    }
   }
 
   /// x, y entre −1 y 1, con y positivo hacia ARRIBA.

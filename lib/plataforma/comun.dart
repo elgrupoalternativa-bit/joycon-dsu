@@ -17,6 +17,9 @@ abstract class Salida {
   /// Texto largo para la pantalla de ajustes.
   String get ayuda;
 
+  /// El jugador tocó algo: si la búsqueda estaba en pausa, retomarla.
+  void despertar() {}
+
   // ------------------------------------------------ easter egg de las fotos
   /// Las fotos secretas, una por una a medida que estén listas.
   Stream<Uint8List> fotos();

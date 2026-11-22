@@ -125,6 +125,9 @@ class _SalidaNativa implements Salida {
   bool get editaFotos => true;
 
   @override
+  void despertar() {}
+
+  @override
   Future<void> agregarFotos() => _fotos.agregar();
 
   @override
