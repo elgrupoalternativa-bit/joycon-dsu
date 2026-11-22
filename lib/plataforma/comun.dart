@@ -1,4 +1,6 @@
 // Lo que comparten la versión app (Android/iPhone) y la versión página web.
+import 'dart:typed_data';
+
 import '../dsu/control_state.dart';
 
 /// Hacia dónde va el control: a la Xbox directo (app) o a la central (web).
@@ -14,6 +16,15 @@ abstract class Salida {
 
   /// Texto largo para la pantalla de ajustes.
   String get ayuda;
+
+  // ------------------------------------------------ easter egg de las fotos
+  /// Las fotos secretas, una por una a medida que estén listas.
+  Stream<Uint8List> fotos();
+
+  /// Solo la central (el celular con la app) puede agregar o borrar fotos.
+  bool get editaFotos;
+  Future<void> agregarFotos();
+  Future<void> borrarFoto(int indice);
 }
 
 typedef CrearSalida = Salida Function({

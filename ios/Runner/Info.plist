@@ -55,6 +55,8 @@
 	<string>Main</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Para que la Xbox (JADYX) reciba los botones y el movimiento de este control por el Wi-Fi.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Para elegir las fotos secretas que verán tus amigos conectados a la partida.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>Para usar el giroscopio y el acelerómetro como el control de movimiento de un Joy-Con.</string>
 	<key>UIRequiresFullScreen</key>

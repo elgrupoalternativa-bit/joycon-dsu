@@ -43,6 +43,8 @@ dependencies:
   http: ^1.6.0
   web: ^1.1.2
   qr_flutter: ^4.1.0
+  image_picker: ^1.2.4
+  path_provider: ^2.1.6
 
 dev_dependencies:
   flutter_test:

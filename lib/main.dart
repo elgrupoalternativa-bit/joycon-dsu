@@ -7,6 +7,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'control_app.dart';
 import 'ui/joycons.dart';
+import 'ui/secreto.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -53,7 +54,7 @@ class PantallaControl extends StatelessWidget {
           final control = switch (app.modo) {
             ModoControl.dosJoycon => Row(children: [
                 Expanded(child: JoyconIzquierdo(app: app)),
-                const _Pantallita(),
+                ToquesSecretos(app: app, child: const _Pantallita()),
                 Expanded(child: JoyconDerecho(app: app)),
               ]),
             ModoControl.joyconIzquierdo => JoyconDeLado(app: app, izquierdo: true),
@@ -64,6 +65,13 @@ class PantallaControl extends StatelessWidget {
           // isla o el notch); solo los avisos respetan el área segura.
           return Stack(children: [
             Padding(padding: const EdgeInsets.all(4), child: control),
+            // Con un solo Joy-Con no hay franja: el secreto queda en la esquina de abajo a la izquierda.
+            if (app.modo != ModoControl.dosJoycon)
+              Positioned(
+                left: 0,
+                bottom: 0,
+                child: ToquesSecretos(app: app, child: const SizedBox(width: 60, height: 60)),
+              ),
             SafeArea(child: Align(alignment: Alignment.topCenter, child: _Estado(app: app))),
             if (!app.arrancado) SafeArea(child: _Empezar(app: app)),
             if (app.arrancado && vertical && ControlApp.esWeb) const SafeArea(child: _Gira()),

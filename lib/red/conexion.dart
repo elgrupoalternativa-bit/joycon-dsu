@@ -1,5 +1,6 @@
 // Conexión directa (WebRTC) entre los iPhone (página web) y la central Android.
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
@@ -12,20 +13,47 @@ typedef Aviso = void Function();
 // =============================================================== CENTRAL
 // Corre en el Android. Recibe hasta 7 controles remotos (jugadores 2 a 8).
 
+/// Fotos del easter egg. Viven solo en la central y viajan por el Wi-Fi,
+/// directo al celular que las pide: nunca se suben a internet.
+abstract class FuenteFotos {
+  Future<List<Uint8List>> leer();
+}
+
+const _tamTrozo = 16000;
+
 class _Remoto {
   _Remoto(this.id, this.pc);
   final String id;
   final RTCPeerConnection pc;
   RTCDataChannel? canal;
+  RTCDataChannel? canalFotos;
   int? jugador; // 1..7 (el 0 es el propio Android)
   final ControlState estado = ControlState();
   DateTime ultimoDato = DateTime.now();
 }
 
 class Central {
-  Central({required this.reloj, required this.alCambiar});
+  Central({required this.reloj, required this.alCambiar, this.fotos});
   final Stopwatch reloj;
   final Aviso alCambiar;
+  final FuenteFotos? fotos;
+
+  /// Manda todas las fotos por el canal seguro: `F:i:total:bytes`,
+  /// los trozos binarios, y al final `LISTO`.
+  Future<void> _mandarFotos(RTCDataChannel canal) async {
+    final lista = await fotos?.leer() ?? const <Uint8List>[];
+    for (var i = 0; i < lista.length; i++) {
+      final f = lista[i];
+      await canal.send(RTCDataChannelMessage('F:$i:${lista.length}:${f.length}'));
+      for (var o = 0; o < f.length; o += _tamTrozo) {
+        final fin = o + _tamTrozo < f.length ? o + _tamTrozo : f.length;
+        await canal.send(RTCDataChannelMessage.fromBinary(Uint8List.sublistView(f, o, fin)));
+        // Sin apurar el canal: que no se llene y no le quite aire a los controles.
+        await Future<void>.delayed(const Duration(milliseconds: 6));
+      }
+    }
+    await canal.send(RTCDataChannelMessage('LISTO:${lista.length}'));
+  }
 
   Senal? _senal;
   final Map<String, _Remoto> _remotos = {};
@@ -107,6 +135,13 @@ class Central {
         });
       };
       pc.onDataChannel = (canal) {
+        if (canal.label == 'fotos') {
+          r.canalFotos = canal;
+          canal.onMessage = (msg) {
+            if (!msg.isBinary && msg.text == 'FOTOS?') unawaited(_mandarFotos(canal));
+          };
+          return;
+        }
         r.canal = canal;
         canal.onDataChannelState = (st) {
           if (st == RTCDataChannelState.RTCDataChannelOpen) {
@@ -154,6 +189,10 @@ class Cliente {
   Senal? _senal;
   RTCPeerConnection? _pc;
   RTCDataChannel? _canal;
+  RTCDataChannel? _canalFotos;
+  StreamController<Uint8List>? _llegando;
+  BytesBuilder? _armando;
+  int _faltan = 0;
   Timer? _envio;
   Timer? _reintento;
 
@@ -198,6 +237,10 @@ class Cliente {
         ..maxRetransmits = 0;
       final canal = await pc.createDataChannel('control', init);
       _canal = canal;
+      // Canal aparte, seguro y en orden, solo para las fotos del secreto.
+      final fotos = await pc.createDataChannel('fotos', RTCDataChannelInit()..ordered = true);
+      _canalFotos = fotos;
+      fotos.onMessage = _alTrozoFoto;
 
       canal.onDataChannelState = (st) {
         if (st == RTCDataChannelState.RTCDataChannelOpen) {
@@ -271,6 +314,44 @@ class Cliente {
   void _reintentarEn(int s) {
     _reintento?.cancel();
     _reintento = Timer(Duration(seconds: s), _intentar);
+  }
+
+  /// Pide las fotos a la central. Van llegando una por una; el stream se
+  /// cierra al terminar (vacío si no hay central o no hay fotos).
+  Stream<Uint8List> pedirFotos() {
+    _llegando?.close();
+    final c = StreamController<Uint8List>();
+    _llegando = c;
+    final canal = _canalFotos;
+    if (canal == null || canal.state != RTCDataChannelState.RTCDataChannelOpen) {
+      c.close();
+    } else {
+      canal.send(RTCDataChannelMessage('FOTOS?'));
+    }
+    return c.stream;
+  }
+
+  void _alTrozoFoto(RTCDataChannelMessage msg) {
+    final c = _llegando;
+    if (c == null || c.isClosed) return;
+    if (!msg.isBinary) {
+      final t = msg.text;
+      if (t.startsWith('F:')) {
+        _faltan = int.tryParse(t.split(':').last) ?? 0;
+        _armando = BytesBuilder(copy: false);
+      } else if (t.startsWith('LISTO')) {
+        c.close();
+      }
+      return;
+    }
+    final b = _armando;
+    if (b == null) return;
+    b.add(msg.binary);
+    _faltan -= msg.binary.length;
+    if (_faltan <= 0) {
+      c.add(b.takeBytes());
+      _armando = null;
+    }
   }
 
   Future<void> detener() async {

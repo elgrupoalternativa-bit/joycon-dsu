@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
+import 'dart:typed_data';
 
 import 'package:web/web.dart' as web;
 
@@ -91,6 +92,18 @@ class _SalidaWeb implements Salida {
 
   @override
   bool get ok => _cliente.estado == 'conectado';
+
+  @override
+  Stream<Uint8List> fotos() => _cliente.pedirFotos();
+
+  @override
+  bool get editaFotos => false;
+
+  @override
+  Future<void> agregarFotos() async {}
+
+  @override
+  Future<void> borrarFoto(int indice) async {}
 
   @override
   String get texto => switch (_cliente.estado) {

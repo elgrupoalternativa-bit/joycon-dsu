@@ -2,7 +2,10 @@
 // además, central para los iPhone que entran por la página web.
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 
 import '../dsu/control_state.dart';
@@ -45,9 +48,44 @@ Salida crearSalida({
 }) =>
     _SalidaNativa(leer, alCambiar, reloj);
 
+/// Fotos secretas guardadas dentro de la app (no en la galería ni en internet).
+class _FotosLocales implements FuenteFotos {
+  Future<Directory> _carpeta() async {
+    final base = await getApplicationDocumentsDirectory();
+    final d = Directory('${base.path}/secreto');
+    if (!await d.exists()) await d.create(recursive: true);
+    return d;
+  }
+
+  Future<List<File>> archivos() async {
+    final d = await _carpeta();
+    final l = d.listSync().whereType<File>().where((f) => f.path.endsWith('.jpg')).toList()
+      ..sort((a, b) => a.path.compareTo(b.path));
+    return l;
+  }
+
+  @override
+  Future<List<Uint8List>> leer() async => [for (final f in await archivos()) await f.readAsBytes()];
+
+  Future<void> agregar() async {
+    // Achicadas para que viajen rápido por el Wi-Fi (~150 KB cada una).
+    final elegidas = await ImagePicker().pickMultiImage(maxWidth: 1280, maxHeight: 1280, imageQuality: 72);
+    final d = await _carpeta();
+    for (final x in elegidas) {
+      final nombre = '${DateTime.now().microsecondsSinceEpoch}.jpg';
+      await File('${d.path}/$nombre').writeAsBytes(await x.readAsBytes());
+    }
+  }
+
+  Future<void> borrar(int i) async {
+    final l = await archivos();
+    if (i >= 0 && i < l.length) await l[i].delete();
+  }
+}
+
 class _SalidaNativa implements Salida {
   _SalidaNativa(this._leer, this._alCambiar, Stopwatch reloj) {
-    _central = Central(reloj: reloj, alCambiar: _alCambiar);
+    _central = Central(reloj: reloj, alCambiar: _alCambiar, fotos: _fotos);
     // Puerto 26760: jugador 1 (este celular) y jugadores 2 a 4 (iPhone).
     _dsu1 = DsuServer(
       puerto: puertoDsu,
@@ -60,6 +98,23 @@ class _SalidaNativa implements Salida {
 
   final ControlState Function() _leer;
   final void Function() _alCambiar;
+  final _FotosLocales _fotos = _FotosLocales();
+
+  @override
+  Stream<Uint8List> fotos() async* {
+    for (final f in await _fotos.archivos()) {
+      yield await f.readAsBytes();
+    }
+  }
+
+  @override
+  bool get editaFotos => true;
+
+  @override
+  Future<void> agregarFotos() => _fotos.agregar();
+
+  @override
+  Future<void> borrarFoto(int indice) => _fotos.borrar(indice);
   late final Central _central;
   late final DsuServer _dsu1, _dsu2;
   String _ip = '…';
