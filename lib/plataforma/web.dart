@@ -79,7 +79,13 @@ Salida crearSalida({
 
 class _SalidaWeb implements Salida {
   _SalidaWeb(ControlState Function() leer, void Function() alCambiar) {
-    _cliente = Cliente(leer: leer, alCambiar: alCambiar);
+    final c = Uri.base.queryParameters['c'];
+    _cliente = Cliente(
+      leer: leer,
+      alCambiar: alCambiar,
+      // Solo nombres nuestros: letras, números y guiones.
+      centralDelQr: c != null && RegExp(r'^joycondsu-[a-z0-9-]{4,40}$').hasMatch(c) ? c : null,
+    );
   }
 
   late final Cliente _cliente;
@@ -103,6 +109,9 @@ class _SalidaWeb implements Salida {
   bool get editaFotos => false;
 
   @override
+  String get linkAmigos => linkPagina;
+
+  @override
   Future<void> agregarFotos() async {}
 
   @override
@@ -113,6 +122,7 @@ class _SalidaWeb implements Salida {
         'conectado' => _cliente.jugador != null ? 'Jugador ${_cliente.jugador}' : 'Conectado',
         'conectando' => 'Conectando…',
         'sin-central' => 'Sin central',
+        'sin-enlace' => 'Sin enlace · reintento',
         'lleno' => 'Ya hay 8',
         'error' => 'Reintentando…',
         'pausado' => 'Sin central · toca un botón',
@@ -123,10 +133,13 @@ class _SalidaWeb implements Salida {
   String get ayuda =>
       'Estado: ${switch (_cliente.estado) {
         'conectado' => 'conectado a la central${_cliente.jugador != null ? ' como jugador ${_cliente.jugador}' : ''}.',
-        'sin-central' => 'no encuentro la central (el celular con la app abierta) en este Wi-Fi.',
+        'sin-central' => 'la central no contesta. ¿El celular del dueño tiene la app abierta y en pantalla?',
+        'sin-enlace' => 'la central contestó, pero el enlace directo por el Wi-Fi no abrió. Revisa que estés en el mismo Wi-Fi (no en datos).',
         'lleno' => 'la central ya tiene 8 jugadores.',
+        'error' => 'error: ${_cliente.detalle ?? 'desconocido'}.',
         _ => 'buscando la central…',
-      }}\n\n'
+      }}\n'
+      '(Central: ${_cliente.central ?? '…'}${_cliente.centralDelQr != null ? ', del QR' : ', por la red'})\n\n'
       'Este control funciona por el link, sin instalar nada.\n\n'
       'Necesita que en el mismo Wi-Fi esté la central: el celular del dueño de la consola '
       'con la app Joy-Con DSU abierta. Ella le pasa tu control a la Xbox como un jugador '

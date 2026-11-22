@@ -90,7 +90,8 @@ Uint8List mqttConnect(String clientId) =>
 
 Uint8List mqttSubscribe(String tema) => _paquete(0x82, [0, 1, ..._texto(tema), 0]);
 
-Uint8List mqttPublish(String tema, String texto) => _paquete(0x30, [..._texto(tema), ...utf8.encode(texto)]);
+Uint8List mqttPublish(String tema, String texto, {bool retener = false}) =>
+    _paquete(retener ? 0x31 : 0x30, [..._texto(tema), ...utf8.encode(texto)]);
 
 /// Junta los pedazos que llegan por el WebSocket y saca paquetes MQTT
 /// completos (pueden venir varios juntos o uno partido).
@@ -126,28 +127,50 @@ class LectorMqtt {
 
 // ----------------------------------------------------------------- Senal
 
-/// Conexión al mensajero. [id] es nuestro "buzón": lo que otros publiquen ahí
-/// nos llega.
-class Senal {
-  Senal(this.id);
-  final String id;
+class _Enlace {
+  _Enlace(this.url, this.ws);
+  final String url;
+  final WebSocketChannel ws;
+  Timer? ping;
+  final ecos = <String, Completer<void>>{};
+}
 
-  WebSocketChannel? _ws;
-  Timer? _ping;
+/// Conexión al mensajero. [id] es nuestro "buzón": lo que otros publiquen ahí
+/// nos llega. [otrosBuzones]: nombres extra por los que también nos encuentran.
+///
+/// Se conecta a LOS DOS servidores a la vez y publica en ambos (21-nov-2026: si
+/// la central quedaba en uno y el amigo en el otro, nunca se encontraban). Lo
+/// que llega repetido por los dos se descarta con el número `n` del mensaje.
+class Senal {
+  Senal(this.id, {this.otrosBuzones = const []});
+  final String id;
+  final List<String> otrosBuzones;
+
+  final _enlaces = <_Enlace>[];
   bool _cerrada = false;
+  final _vistos = <String>[];
+  final _rand = Random();
   final _mensajes = StreamController<Mensaje>.broadcast();
   Stream<Mensaje> get mensajes => _mensajes.stream;
 
-  /// Se conecta al primer servidor que responda y se suscribe al buzón.
-  /// Termina con OPEN o ERROR.
+  /// Cuántos servidores están conectados ahora.
+  int get conectados => _enlaces.length;
+
+  String _numero() => List.generate(12, (_) => _rand.nextInt(36).toRadixString(36)).join();
+
+  /// Se conecta a todos los servidores que respondan y se suscribe a los
+  /// buzones. Termina con OPEN (al menos uno) o ERROR.
   Future<String> conectar() async {
-    for (final url in servidoresMqtt) {
-      if (await _probar(url)) return 'OPEN';
+    final r = await Future.wait([for (final url in servidoresMqtt) _probar(url)]);
+    if (_enlaces.isEmpty) return 'ERROR';
+    for (var i = 0; i < r.length; i++) {
+      if (!r[i]) _volver(servidoresMqtt[i]); // el que falló se reintenta solo
     }
-    return 'ERROR';
+    return 'OPEN';
   }
 
   Future<bool> _probar(String url) async {
+    if (_cerrada) return false;
     WebSocketChannel ws;
     try {
       ws = WebSocketChannel.connect(Uri.parse(url), protocols: ['mqtt']);
@@ -155,6 +178,7 @@ class Senal {
     } catch (_) {
       return false;
     }
+    final e = _Enlace(url, ws);
     final lector = LectorMqtt();
     final aceptado = Completer<bool>();
     ws.stream.listen(
@@ -165,50 +189,124 @@ class Senal {
             // CONNACK: el segundo byte es el código (0 = aceptado).
             if (!aceptado.isCompleted) aceptado.complete(cuerpo.length >= 2 && cuerpo[1] == 0);
           } else if (tipo == 3) {
-            final (_, texto) = leerPublish(cuerpo);
-            try {
-              final c = jsonDecode(texto) as Map<String, dynamic>;
-              if (c['de'] == id) continue; // el eco de lo nuestro
-              _mensajes.add(Mensaje(c['tipo'] as String? ?? '', c['de'] as String?, (c['datos'] as Map?)?.cast<String, dynamic>()));
-            } catch (_) {
-              // Algo que no es nuestro en el tema: se ignora.
-            }
+            _alPublish(e, cuerpo);
           }
         }
       },
-      onError: (Object e) {
+      onError: (Object _) {
         if (!aceptado.isCompleted) aceptado.complete(false);
       },
       onDone: () {
         if (!aceptado.isCompleted) aceptado.complete(false);
-        if (identical(_ws, ws) && !_cerrada) _mensajes.add(Mensaje('CLOSE', null, null));
+        _soltar(e);
       },
     );
-    final r = Random();
-    ws.sink.add(mqttConnect('jc${List.generate(16, (_) => r.nextInt(36).toRadixString(36)).join()}'));
+    ws.sink.add(mqttConnect('jc${_numero()}'));
     final ok = await aceptado.future.timeout(const Duration(seconds: 6), onTimeout: () => false);
-    if (!ok) {
+    if (!ok || _cerrada) {
       await ws.sink.close();
       return false;
     }
-    _ws = ws;
-    ws.sink.add(mqttSubscribe(_tema(id)));
-    _ping?.cancel();
-    _ping = Timer.periodic(const Duration(seconds: 30), (_) => _ws?.sink.add(Uint8List.fromList([0xC0, 0])));
+    for (final b in [id, ...otrosBuzones]) {
+      ws.sink.add(mqttSubscribe(_tema(b)));
+    }
+    e.ping = Timer.periodic(const Duration(seconds: 30), (_) => ws.sink.add(Uint8List.fromList([0xC0, 0])));
+    _enlaces.add(e);
     // Dar un respiro para que la suscripción quede activa antes de que nos escriban.
     await Future<void>.delayed(const Duration(milliseconds: 400));
     return true;
   }
 
-  /// Publica un mensaje en el buzón de [destino].
+  void _alPublish(_Enlace e, Uint8List cuerpo) {
+    final (_, texto) = leerPublish(cuerpo);
+    Map<String, dynamic> c;
+    try {
+      c = jsonDecode(texto) as Map<String, dynamic>;
+    } catch (_) {
+      return; // Algo que no es nuestro en el tema: se ignora.
+    }
+    final n = c['n'] as String?;
+    if (c['tipo'] == 'ECO') {
+      e.ecos.remove(n)?.complete();
+      return;
+    }
+    if (c['de'] == id) return; // lo nuestro de vuelta
+    if (n != null) {
+      if (_vistos.contains(n)) return; // ya llegó por el otro servidor
+      _vistos.add(n);
+      if (_vistos.length > 300) _vistos.removeAt(0);
+    }
+    _mensajes.add(Mensaje(c['tipo'] as String? ?? '', c['de'] as String?, (c['datos'] as Map?)?.cast<String, dynamic>()));
+  }
+
+  /// Un servidor se cayó: se intenta de nuevo en un rato. Solo si se cayeron
+  /// TODOS se avisa CLOSE.
+  void _soltar(_Enlace e) {
+    e.ping?.cancel();
+    if (!_enlaces.remove(e) || _cerrada) return;
+    if (_enlaces.isEmpty) {
+      _mensajes.add(Mensaje('CLOSE', null, null));
+    } else {
+      _volver(e.url);
+    }
+  }
+
+  void _volver(String url) {
+    Timer(const Duration(seconds: 5), () async {
+      if (_cerrada || _enlaces.isEmpty || _enlaces.any((x) => x.url == url)) return;
+      if (!await _probar(url)) _volver(url);
+    });
+  }
+
+  /// Se manda un mensaje a sí mismo por cada servidor y espera que vuelva.
+  /// Así se nota una conexión "muerta en vida" (el celular cree que está
+  /// conectado pero el servidor ya lo soltó). Las que no responden se cierran.
+  /// Devuelve cuántos servidores respondieron.
+  Future<int> revisarEco() async {
+    var vivos = 0;
+    await Future.wait([
+      for (final e in List.of(_enlaces))
+        () async {
+          final n = _numero();
+          final c = Completer<void>();
+          e.ecos[n] = c;
+          e.ws.sink.add(mqttPublish(_tema(id), jsonEncode({'tipo': 'ECO', 'de': id, 'n': n})));
+          try {
+            await c.future.timeout(const Duration(seconds: 5));
+            vivos++;
+          } catch (_) {
+            e.ecos.remove(n);
+            await e.ws.sink.close(); // dispara _soltar y la reconexión
+          }
+        }(),
+    ]);
+    return vivos;
+  }
+
+  /// Publica un mensaje en el buzón de [destino], por todos los servidores.
   Future<void> enviar(String tipo, String destino, Map<String, dynamic> datos) async {
-    _ws?.sink.add(mqttPublish(_tema(destino), jsonEncode({'tipo': tipo, 'de': id, 'datos': datos})));
+    final p = mqttPublish(_tema(destino), jsonEncode({'tipo': tipo, 'de': id, 'n': _numero(), 'datos': datos}));
+    for (final e in _enlaces) {
+      e.ws.sink.add(p);
+    }
+  }
+
+  /// Deja un aviso fijo en [tema] (el servidor se lo entrega a quien llegue
+  /// después). Lo usamos para poder revisar la central desde afuera.
+  void dejarAviso(String tema, Map<String, dynamic> datos) {
+    final p = mqttPublish('joycondsu/v1/$tema', jsonEncode(datos), retener: true);
+    for (final e in _enlaces) {
+      e.ws.sink.add(p);
+    }
   }
 
   Future<void> cerrar() async {
     _cerrada = true;
-    _ping?.cancel();
-    await _ws?.sink.close();
+    for (final e in List.of(_enlaces)) {
+      e.ping?.cancel();
+      await e.ws.sink.close();
+    }
+    _enlaces.clear();
   }
 }
 

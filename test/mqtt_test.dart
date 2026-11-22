@@ -30,4 +30,28 @@ void main() {
     await a.cerrar();
     await b.cerrar();
   }, timeout: const Timeout(Duration(seconds: 40)));
+
+  test('central con dos nombres en los dos servidores: llega UNA vez y el eco responde', () async {
+    final fijo = idAleatorio('prueba-fijo');
+    final red = idAleatorio('prueba-red');
+    final central = Senal(fijo, otrosBuzones: [red]);
+    final amigo = Senal(idAleatorio('prueba-amigo'));
+    expect(await central.conectar(), 'OPEN');
+    expect(await amigo.conectar(), 'OPEN');
+    expect(central.conectados, 2, reason: 'debe quedar en los dos servidores');
+    final llegados = <Mensaje>[];
+    final sub = central.mensajes.listen(llegados.add);
+    await amigo.enviar('OFFER', red, {'sdp': 'x'}); // el amigo que llega por la red
+    await amigo.enviar('OFFER', fijo, {'sdp': 'y'}); // el que llega por el QR
+    await Future<void>.delayed(const Duration(seconds: 3));
+    expect(llegados.map((m) => m.datos!['sdp']).toList()..sort(), ['x', 'y']);
+    // Contesta firmando con el nombre fijo; el amigo lo recibe aunque haya llamado al otro.
+    final resp = amigo.mensajes.firstWhere((m) => m.tipo == 'ANSWER').timeout(const Duration(seconds: 8));
+    await central.enviar('ANSWER', amigo.id, {'sdp': 'z'});
+    expect((await resp).origen, fijo);
+    expect(await central.revisarEco(), 2);
+    await sub.cancel();
+    await central.cerrar();
+    await amigo.cerrar();
+  }, timeout: const Timeout(Duration(seconds: 60)));
 }

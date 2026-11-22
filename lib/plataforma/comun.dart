@@ -3,6 +3,9 @@ import 'dart:typed_data';
 
 import '../dsu/control_state.dart';
 
+/// La página de los amigos.
+const linkPagina = 'https://elgrupoalternativa-bit.github.io/joycon-dsu/';
+
 /// Hacia dónde va el control: a la Xbox directo (app) o a la central (web).
 abstract class Salida {
   Future<void> iniciar();
@@ -19,6 +22,9 @@ abstract class Salida {
 
   /// El jugador tocó algo: si la búsqueda estaba en pausa, retomarla.
   void despertar() {}
+
+  /// Lo que va en el QR para los amigos (en la app lleva el nombre de la central).
+  String get linkAmigos => linkPagina;
 
   // ------------------------------------------------ easter egg de las fotos
   /// Las fotos secretas, una por una a medida que estén listas.

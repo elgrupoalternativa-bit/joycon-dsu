@@ -33,10 +33,21 @@ class _Remoto {
 }
 
 class Central {
-  Central({required this.reloj, required this.alCambiar, this.fotos});
+  Central({required this.reloj, required this.alCambiar, this.fotos, this.idFijo});
   final Stopwatch reloj;
   final Aviso alCambiar;
   final FuenteFotos? fotos;
+
+  /// Nombre propio de este celular (no cambia nunca). Va dentro del QR, así
+  /// el amigo que escanea llega directo aunque la "IP de la casa" no coincida.
+  String? idFijo;
+
+  /// Nombre calculado con la IP pública (para quien abre el link sin QR).
+  String? nombreRed;
+
+  /// Cuántos servidores de mensajes responden ahora mismo (0, 1 o 2).
+  int servidores = 0;
+  Timer? _vigilancia;
 
   /// Manda todas las fotos por el canal seguro: `F:i:total:bytes`,
   /// los trozos binarios, y al final `LISTO`.
@@ -93,12 +104,22 @@ class Central {
     _senal = null; // así su aviso de "cerrado" no dispara otra reconexión
     await viejo?.cerrar();
     try {
-      final nombre = await nombreCentral();
-      final s = Senal(nombre);
+      String? red;
+      try {
+        red = await nombreCentral().timeout(const Duration(seconds: 6));
+      } catch (_) {
+        red = null; // sin la IP igual sirve el nombre fijo del QR
+      }
+      nombreRed = red;
+      final fijo = idFijo;
+      final buzones = [?fijo, ?red];
+      if (buzones.isEmpty) throw StateError('sin nombre');
+      final s = Senal(buzones.first, otrosBuzones: buzones.sublist(1));
       _senal = s;
       s.mensajes.listen((m) {
         if (m.tipo == 'CLOSE' && identical(_senal, s)) {
           estado = 'buscando';
+          servidores = 0;
           alCambiar();
           _reintentar(3);
           return;
@@ -106,12 +127,49 @@ class Central {
         _alMensaje(m);
       });
       final r = await s.conectar();
-      estado = r == 'OPEN' ? 'lista' : (r == 'ID-TAKEN' ? 'otra' : 'error');
+      estado = r == 'OPEN' ? 'lista' : 'error';
+      servidores = s.conectados;
+      if (estado == 'lista') _anunciar(s);
     } catch (_) {
       estado = 'error';
     }
     alCambiar();
-    if (estado != 'lista') _reintentar(estado == 'otra' ? 6 : 4);
+    if (estado != 'lista') _reintentar(4);
+    _vigilancia ??= Timer.periodic(const Duration(seconds: 20), (_) => _vigilar());
+  }
+
+  /// Cada 20 s se manda un mensaje a sí misma por cada servidor. Si no vuelve
+  /// por ninguno, la conexión estaba muerta aunque pareciera viva: se rehace.
+  Future<void> _vigilar() async {
+    final s = _senal;
+    if (_detenida || s == null || estado != 'lista') return;
+    final vivos = await s.revisarEco();
+    if (!identical(_senal, s)) return;
+    if (vivos != servidores) {
+      servidores = vivos;
+      alCambiar();
+    }
+    if (vivos == 0) {
+      estado = 'buscando';
+      alCambiar();
+      unawaited(_registrar());
+    } else {
+      _anunciar(s);
+    }
+  }
+
+  /// Deja un aviso fijo "aquí estoy" con la hora, para revisar la central desde
+  /// afuera (desde el PC) sin tener que ver la pantalla del celular.
+  void _anunciar(Senal s) {
+    final red = nombreRed;
+    if (red == null) return;
+    s.dejarAviso('estado/$red', {
+      'fijo': idFijo,
+      'servidores': s.conectados,
+      'jugadores': remotos,
+      'hora': DateTime.now().toUtc().toIso8601String(),
+      'error': ultimoError,
+    });
   }
 
   void _reintentar(int segundos) {
@@ -130,6 +188,7 @@ class Central {
     _detenida = true;
     _reconexion?.cancel();
     _limpieza?.cancel();
+    _vigilancia?.cancel();
     for (final r in _remotos.values) {
       await r.pc.close();
     }
@@ -230,9 +289,22 @@ Future<String> sdpCompleto(RTCPeerConnection pc) async {
 // el estado del control 60 veces por segundo.
 
 class Cliente {
-  Cliente({required this.leer, required this.alCambiar});
+  Cliente({required this.leer, required this.alCambiar, this.centralDelQr});
   final ControlState Function() leer;
   final Aviso alCambiar;
+
+  /// Nombre de la central que venía en el QR (`?c=`). Si no hay, se calcula
+  /// con la IP de la casa.
+  final String? centralDelQr;
+
+  /// Si la central contestó en el último intento (para saber qué falló).
+  bool respondio = false;
+
+  /// Último error raro (se muestra en la ayuda de la página).
+  String? detalle;
+
+  /// La central a la que se está llamando.
+  String? get central => _central;
 
   Senal? _senal;
   RTCPeerConnection? _pc;
@@ -304,7 +376,10 @@ class Cliente {
         if (identical(_senal, s)) _senal = null;
         return;
       }
-      if (m.origen != _central || m.tipo != 'ANSWER' || m.datos == null) return;
+      // A este buzón (nombre al azar) solo escribe la central a la que le
+      // mandamos la oferta; puede firmar con su nombre fijo o el de la red.
+      if (m.tipo != 'ANSWER' || m.datos == null) return;
+      respondio = true;
       final pc = _pc;
       if (pc == null) return;
       try {
@@ -322,9 +397,11 @@ class Cliente {
     _ocupado = true;
     try {
       _poner('buscando');
-      final central = _central ??= await nombreCentral();
+      respondio = false;
+      final central = _central ??= centralDelQr ?? await nombreCentral();
       final s = await _buzon();
       if (s == null) {
+        detalle = 'no hay conexión con el servidor de mensajes';
         _poner('error');
         _siguiente();
         return;
@@ -366,7 +443,8 @@ class Cliente {
       };
       pc.onConnectionState = (st) {
         if (st == RTCPeerConnectionState.RTCPeerConnectionStateFailed && identical(_pc, pc)) {
-          _poner('error');
+          _reintento?.cancel();
+          _poner('sin-enlace');
           _siguiente();
         }
       };
@@ -379,11 +457,13 @@ class Cliente {
       // Si en 8 s no abrió, la central no está (o no contestó): esperar y reintentar.
       _reintento = Timer(const Duration(seconds: 8), () {
         if (estado != 'conectado') {
-          _poner('sin-central');
+          // Contestó pero el enlace directo no abrió = problema del Wi-Fi.
+          _poner(respondio ? 'sin-enlace' : 'sin-central');
           _siguiente();
         }
       });
-    } catch (_) {
+    } catch (e) {
+      detalle = '$e';
       _poner('error');
       _siguiente();
     } finally {

@@ -185,7 +185,7 @@ class _Estado extends StatelessWidget {
           if (!ControlApp.esWeb) ...[
             const SizedBox(width: 10),
             GestureDetector(
-              onTap: () => _mostrarQr(context),
+              onTap: () => _mostrarQr(context, app.salida.linkAmigos),
               child: const Icon(Icons.qr_code_2_rounded, size: 20, color: Colors.white),
             ),
           ],
@@ -197,23 +197,22 @@ class _Estado extends StatelessWidget {
   }
 }
 
-/// Link de la página que abren los amigos (iPhone o Android, sin instalar nada).
-const linkAmigos = 'https://elgrupoalternativa-bit.github.io/joycon-dsu/';
-
+/// QR con el link de la página de los amigos (lleva el nombre de esta central).
 class _Qr extends StatelessWidget {
-  const _Qr({this.tamano = 200});
+  const _Qr({required this.link, this.tamano = 200});
+  final String link;
   final double tamano;
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
-      child: QrImageView(data: linkAmigos, size: tamano, backgroundColor: Colors.white),
+      child: QrImageView(data: link, size: tamano, backgroundColor: Colors.white),
     );
   }
 }
 
-void _mostrarQr(BuildContext context) {
+void _mostrarQr(BuildContext context, String link) {
   showDialog<void>(
     context: context,
     builder: (context) => Dialog(
@@ -223,7 +222,7 @@ void _mostrarQr(BuildContext context) {
         child: LayoutBuilder(builder: (context, c) {
           final alto = MediaQuery.of(context).size.height;
           return Row(mainAxisSize: MainAxisSize.min, children: [
-            _Qr(tamano: (alto - 120).clamp(140, 260)),
+            _Qr(link: link, tamano: (alto - 120).clamp(140, 260)),
             const SizedBox(width: 20),
             const SizedBox(
               width: 230,
@@ -304,7 +303,7 @@ class _Ajustes extends StatelessWidget {
             Text(app.salida.ayuda, style: const TextStyle(color: Colors.white70, height: 1.4)),
             if (!ControlApp.esWeb) ...[
               _titulo('QR para tus amigos'),
-              const Align(alignment: Alignment.centerLeft, child: _Qr(tamano: 170)),
+              Align(alignment: Alignment.centerLeft, child: _Qr(link: app.salida.linkAmigos, tamano: 170)),
             ],
             _titulo('Cómo quieres el control'),
             SegmentedButton<ModoControl>(

@@ -12,6 +12,7 @@ import 'package:sensors_plus/sensors_plus.dart';
 import '../dsu/control_state.dart';
 import '../dsu/dsu_server.dart';
 import '../red/conexion.dart';
+import '../red/senal.dart' show idAleatorio;
 import 'comun.dart';
 
 const esWeb = false;
@@ -146,6 +147,7 @@ class _SalidaNativa implements Salida {
       _error = 'No se pudo abrir el puerto DSU';
     }
     _ip = await _buscarIp();
+    _central.idFijo = await _idFijo();
     _alCambiar();
     // La central no bloquea: si no hay internet, el control igual funciona.
     unawaited(_central.iniciar());
@@ -166,15 +168,14 @@ class _SalidaNativa implements Salida {
   String get texto {
     if (_error != null) return _error!;
     final iphones = _central.remotos;
-    final extra = iphones > 0 ? ' · +$iphones' : '';
+    final extra = (iphones > 0 ? ' · +$iphones' : '') + (_central.estado == 'lista' ? '' : ' · sin central');
     return ok ? 'Xbox ✓$extra' : '$_ip$extra';
   }
 
   @override
   String get ayuda {
     final c = switch (_central.estado) {
-      'lista' => 'Este celular es la CENTRAL: los amigos escanean el QR (iPhone o Android) y entran solos, cada uno como un jugador aparte.',
-      'otra' => 'Reconectando la central… (el registro anterior tarda hasta un minuto en soltarse; si hay otro celular con la app abierta en este Wi-Fi, ciérrala allá).',
+      'lista' => 'Este celular es la CENTRAL ✓ (${_central.servidores} de 2 servidores): los amigos escanean el QR (iPhone o Android) y entran solos, cada uno como un jugador aparte.',
       'buscando' => 'Preparando la central…',
       _ => 'La central no pudo arrancar (¿hay internet?). Reintentando… Este control igual funciona.',
     } + (_central.ultimoError == null ? '' : '\n(Último error con un amigo: ${_central.ultimoError})');
@@ -184,6 +185,30 @@ class _SalidaNativa implements Salida {
         'Después, en cada Jugador de JADYX elige su control DSU: este celular es el 1º '
         'del primer servidor y los amigos llegan en orden (2º, 3º, 4º, y luego el segundo servidor).\n\n$c\n\n'
         'Celulares y Xbox en el mismo Wi-Fi. Deja la app abierta.';
+  }
+
+  /// Nombre propio de esta central, guardado en la app: el mismo siempre, así
+  /// el QR impreso o guardado sigue sirviendo.
+  Future<String?> _idFijo() async {
+    try {
+      final base = await getApplicationDocumentsDirectory();
+      final f = File('${base.path}/central.txt');
+      if (await f.exists()) {
+        final t = (await f.readAsString()).trim();
+        if (RegExp(r'^joycondsu-[a-z0-9]{10}$').hasMatch(t)) return t;
+      }
+      final nuevo = idAleatorio('joycondsu');
+      await f.writeAsString(nuevo);
+      return nuevo;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  String get linkAmigos {
+    final id = _central.idFijo;
+    return id == null ? linkPagina : '$linkPagina?c=$id';
   }
 
   Future<String> _buscarIp() async {

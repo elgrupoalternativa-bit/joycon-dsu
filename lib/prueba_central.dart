@@ -20,10 +20,10 @@ void main() {
   final estado = ValueNotifier<String>('arrancando');
   void pintar() {
     final j = [for (var n = 1; n <= 7; n++) if (central.jugador(n) != null) 'J${n + 1}: x=${central.jugador(n)!.izqX.toStringAsFixed(2)} a=${central.jugador(n)!.a}'];
-    estado.value = 'estado=${central.estado} remotos=${central.remotos} error=${central.ultimoError} ${j.join(' | ')}';
+    estado.value = 'estado=${central.estado} servidores=${central.servidores} red=${central.nombreRed} remotos=${central.remotos} error=${central.ultimoError} ${j.join(' | ')}';
   }
 
-  central = Central(reloj: reloj, alCambiar: pintar, fotos: _FotosPrueba());
+  central = Central(reloj: reloj, alCambiar: pintar, fotos: _FotosPrueba(), idFijo: 'joycondsu-pruebapc01');
   unawaited(central.iniciar());
   Timer.periodic(const Duration(milliseconds: 300), (_) => pintar());
   runApp(MaterialApp(
