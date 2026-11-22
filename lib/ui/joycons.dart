@@ -32,120 +32,156 @@ class Carcasa extends StatelessWidget {
   }
 }
 
-/// Joy-Con izquierdo vertical (modo dos Joy-Con).
+/// Medidas de una mitad (un Joy-Con) calculadas del espacio real de la pantalla,
+/// para que todo salga lo más grande posible en cualquier celular.
+class _Medidas {
+  _Medidas(BoxConstraints c, {required double bordeExterior}) {
+    final w = c.maxWidth, h = c.maxHeight;
+    exterior = bordeExterior;
+    gatillo = (h * 0.15).clamp(44.0, 64.0);
+    arribaZona = 8 + gatillo + 6;
+    final altoZona = h - arribaZona - 8;
+    final anchoZona = w - exterior - interior;
+    // Palanca y botones en diagonal: cada uno ocupa casi la mitad del ancho
+    // y casi dos tercios del alto, sin chocar entre ellos.
+    grande = [altoZona * 0.64, anchoZona * 0.52].reduce((a, b) => a < b ? a : b).clamp(110.0, 260.0);
+    chico = (grande * 0.26).clamp(38.0, 56.0);
+  }
+  late final double exterior, gatillo, arribaZona, grande, chico;
+  final double interior = 12;
+}
+
+/// Margen del borde de afuera: lo curvo de la carcasa y la isla o notch del iPhone.
+double _bordeExterior(BuildContext context, {required bool izquierdo}) {
+  final p = MediaQuery.of(context).padding;
+  final notch = izquierdo ? p.left : p.right;
+  return 26 + notch * 0.55;
+}
+
+/// Joy-Con izquierdo vertical (modo dos Joy-Con): palanca arriba hacia afuera,
+/// cruceta abajo hacia adentro, como el de verdad.
 class JoyconIzquierdo extends StatelessWidget {
   const JoyconIzquierdo({super.key, required this.app});
   final ControlApp app;
 
   @override
   Widget build(BuildContext context) {
+    final borde = _bordeExterior(context, izquierdo: true);
     return Carcasa(
       color: Color(app.colorIzq),
       izquierdo: true,
       child: LayoutBuilder(builder: (context, c) {
-        // Alto que queda para palanca + botones, quitando gatillos y filas chicas.
-        final libre = c.maxHeight - 44 - 6 - 38 - 8 - 34 - 26;
-        final palanca = (libre * 0.47).clamp(80.0, 170.0);
-        final boton = (libre * 0.5 / 2.9).clamp(30.0, 64.0);
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(28, 8, 14, 10),
-          child: Column(
-            children: [
-              Row(children: [
-                Expanded(child: Gatillo(etiqueta: 'ZL', alCambiar: (v) => app.boton('ZL', v))),
-                const SizedBox(width: 8),
-                Expanded(child: Gatillo(etiqueta: 'L', alCambiar: (v) => app.boton('L', v))),
-              ]),
-              const SizedBox(height: 6),
-              Align(
-                alignment: Alignment.centerRight,
-                child: BotonJoy(etiqueta: '−', diametro: 38, alCambiar: (v) => app.boton('−', v)),
-              ),
-              Expanded(
-                child: Center(
-                  child: Palanca(
-                    diametro: palanca,
-                    alMover: (x, y) => app.palanca(izquierda: true, x: x, y: y),
-                  ),
-                ),
-              ),
-              Cruz(
-                tam: boton,
-                arriba: '↑', abajo: '↓', izq: '←', der: '→',
-                iconos: true,
-                alCambiar: app.boton,
-              ),
-              const SizedBox(height: 8),
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                BotonJoy(etiqueta: 'L3', diametro: 34, alCambiar: (v) => app.boton('L3', v)),
-                BotonJoy(
-                  etiqueta: '',
-                  icono: Icons.circle,
-                  diametro: 34,
-                  forma: BoxShape.rectangle,
-                  colorEtiqueta: Colors.white24,
-                  alCambiar: (v) => app.boton('CAPT', v),
-                ),
-              ]),
-            ],
+        final m = _Medidas(c, bordeExterior: borde);
+        return Stack(children: [
+          // Gatillos arriba, del lado de afuera (el centro queda para la píldora).
+          Positioned(
+            left: m.exterior * 0.6,
+            right: 104,
+            top: 8,
+            child: Row(children: [
+              Expanded(child: Gatillo(etiqueta: 'ZL', alto: m.gatillo, alCambiar: (v) => app.boton('ZL', v))),
+              const SizedBox(width: 8),
+              Expanded(child: Gatillo(etiqueta: 'L', alto: m.gatillo, alCambiar: (v) => app.boton('L', v))),
+            ]),
           ),
-        );
+          Positioned(
+            left: m.exterior,
+            top: m.arribaZona,
+            child: Palanca(diametro: m.grande, alMover: (x, y) => app.palanca(izquierda: true, x: x, y: y)),
+          ),
+          Positioned(
+            right: m.interior,
+            bottom: 8,
+            child: Cruz(
+              tam: m.grande / 2.9,
+              arriba: '↑', abajo: '↓', izq: '←', der: '→',
+              iconos: true,
+              alCambiar: app.boton,
+            ),
+          ),
+          Positioned(
+            right: m.interior + 4,
+            top: m.arribaZona + 4,
+            child: BotonJoy(etiqueta: '−', diametro: m.chico, alCambiar: (v) => app.boton('−', v)),
+          ),
+          Positioned(
+            left: m.exterior,
+            bottom: 10,
+            child: Row(children: [
+              BotonJoy(etiqueta: 'L3', diametro: m.chico, alCambiar: (v) => app.boton('L3', v)),
+              SizedBox(width: m.chico * 0.5),
+              BotonJoy(
+                etiqueta: '',
+                icono: Icons.circle,
+                diametro: m.chico,
+                forma: BoxShape.rectangle,
+                colorEtiqueta: Colors.white24,
+                alCambiar: (v) => app.boton('CAPT', v),
+              ),
+            ]),
+          ),
+        ]);
       }),
     );
   }
 }
 
-/// Joy-Con derecho vertical (modo dos Joy-Con).
+/// Joy-Con derecho vertical (modo dos Joy-Con): botones arriba hacia afuera,
+/// palanca abajo hacia adentro, como el de verdad.
 class JoyconDerecho extends StatelessWidget {
   const JoyconDerecho({super.key, required this.app});
   final ControlApp app;
 
   @override
   Widget build(BuildContext context) {
+    final borde = _bordeExterior(context, izquierdo: false);
     return Carcasa(
       color: Color(app.colorDer),
       izquierdo: false,
       child: LayoutBuilder(builder: (context, c) {
-        // Alto que queda para palanca + botones, quitando gatillos y filas chicas.
-        final libre = c.maxHeight - 44 - 6 - 38 - 8 - 34 - 26;
-        final palanca = (libre * 0.47).clamp(80.0, 170.0);
-        final boton = (libre * 0.5 / 2.9).clamp(30.0, 64.0);
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(14, 8, 28, 10),
-          child: Column(
-            children: [
-              Row(children: [
-                Expanded(child: Gatillo(etiqueta: 'R', alCambiar: (v) => app.boton('R', v))),
-                const SizedBox(width: 8),
-                Expanded(child: Gatillo(etiqueta: 'ZR', alCambiar: (v) => app.boton('ZR', v))),
-              ]),
-              const SizedBox(height: 6),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: BotonJoy(etiqueta: '+', diametro: 38, alCambiar: (v) => app.boton('+', v)),
-              ),
-              Cruz(tam: boton, arriba: 'X', abajo: 'B', izq: 'Y', der: 'A', alCambiar: app.boton),
-              Expanded(
-                child: Center(
-                  child: Palanca(
-                    diametro: palanca,
-                    alMover: (x, y) => app.palanca(izquierda: false, x: x, y: y),
-                  ),
-                ),
-              ),
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                BotonJoy(
-                  etiqueta: '',
-                  icono: Icons.home_rounded,
-                  diametro: 38,
-                  colorEtiqueta: Colors.white70,
-                  alCambiar: (v) => app.boton('HOME', v),
-                ),
-                BotonJoy(etiqueta: 'R3', diametro: 34, alCambiar: (v) => app.boton('R3', v)),
-              ]),
-            ],
+        final m = _Medidas(c, bordeExterior: borde);
+        return Stack(children: [
+          Positioned(
+            left: 104,
+            right: m.exterior * 0.6,
+            top: 8,
+            child: Row(children: [
+              Expanded(child: Gatillo(etiqueta: 'R', alto: m.gatillo, alCambiar: (v) => app.boton('R', v))),
+              const SizedBox(width: 8),
+              Expanded(child: Gatillo(etiqueta: 'ZR', alto: m.gatillo, alCambiar: (v) => app.boton('ZR', v))),
+            ]),
           ),
-        );
+          Positioned(
+            right: m.exterior,
+            top: m.arribaZona,
+            child: Cruz(tam: m.grande / 2.9, arriba: 'X', abajo: 'B', izq: 'Y', der: 'A', alCambiar: app.boton),
+          ),
+          Positioned(
+            left: m.interior,
+            bottom: 8,
+            child: Palanca(diametro: m.grande, alMover: (x, y) => app.palanca(izquierda: false, x: x, y: y)),
+          ),
+          Positioned(
+            left: m.interior + 4,
+            top: m.arribaZona + 4,
+            child: BotonJoy(etiqueta: '+', diametro: m.chico, alCambiar: (v) => app.boton('+', v)),
+          ),
+          Positioned(
+            right: m.exterior,
+            bottom: 10,
+            child: Row(children: [
+              BotonJoy(
+                etiqueta: '',
+                icono: Icons.home_rounded,
+                diametro: m.chico,
+                colorEtiqueta: Colors.white70,
+                alCambiar: (v) => app.boton('HOME', v),
+              ),
+              SizedBox(width: m.chico * 0.5),
+              BotonJoy(etiqueta: 'R3', diametro: m.chico, alCambiar: (v) => app.boton('R3', v)),
+            ]),
+          ),
+        ]);
       }),
     );
   }

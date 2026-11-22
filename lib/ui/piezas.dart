@@ -67,7 +67,8 @@ class _BotonJoyState extends State<BotonJoy> {
         ),
         alignment: Alignment.center,
         child: widget.icono != null
-            ? Icon(widget.icono, color: widget.colorEtiqueta, size: d * 0.5)
+            // Las flechas de la cruceta traen etiqueta y su dibujo es chico: van más grandes.
+            ? Icon(widget.icono, color: widget.colorEtiqueta, size: d * (widget.etiqueta.isEmpty ? 0.5 : 0.95))
             : Text(
                 widget.etiqueta,
                 style: TextStyle(
@@ -83,16 +84,17 @@ class _BotonJoyState extends State<BotonJoy> {
 
 /// Gatillos L / ZL / R / ZR: barras anchas en el borde de arriba.
 class Gatillo extends StatelessWidget {
-  const Gatillo({super.key, required this.etiqueta, required this.alCambiar, this.ancho = 120});
+  const Gatillo({super.key, required this.etiqueta, required this.alCambiar, this.ancho = 120, this.alto = 44});
   final String etiqueta;
   final void Function(bool) alCambiar;
   final double ancho;
+  final double alto;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       width: ancho,
-      height: 44,
+      height: alto,
       child: BotonJoyRect(etiqueta: etiqueta, alCambiar: alCambiar),
     );
   }
@@ -137,6 +139,17 @@ class _BotonJoyRectState extends State<BotonJoyRect> {
   }
 }
 
+/// Zona muerta en el centro y curva suave: un roce no mueve nada, la mitad del
+/// recorrido da poco movimiento (para apuntar fino) y el borde da el 100 %.
+/// Entra y sale entre −1 y 1.
+Offset curvaPalanca(double x, double y, {double zonaMuerta = 0.15, double curva = 1.8}) {
+  final d = sqrt(x * x + y * y);
+  if (d <= zonaMuerta) return Offset.zero;
+  final util = ((min(d, 1.0) - zonaMuerta) / (1 - zonaMuerta));
+  final k = pow(util, curva).toDouble() / d;
+  return Offset(x * k, y * k);
+}
+
 /// Palanca analógica. Devuelve x, y entre −1 y 1 (y positivo = arriba).
 /// Si la presionas fuerte (dos toques rápidos) no hace L3/R3: eso va en un botón.
 class Palanca extends StatefulWidget {
@@ -154,11 +167,12 @@ class _PalancaState extends State<Palanca> {
   void _mover(Offset local) {
     final r = widget.diametro / 2;
     var v = local - Offset(r, r);
-    final maxR = r * 0.62;
+    final maxR = r * 0.72;
     if (v.distance > maxR) v = Offset.fromDirection(v.direction, maxR);
     setState(() => _pos = v);
     // Pantalla: y crece hacia abajo. DSU: y crece hacia arriba. Por eso el signo.
-    widget.alMover(v.dx / maxR, -v.dy / maxR);
+    final s = curvaPalanca(v.dx / maxR, -v.dy / maxR);
+    widget.alMover(s.dx, s.dy);
   }
 
   void _soltar() {

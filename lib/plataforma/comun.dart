@@ -53,5 +53,10 @@ Movimiento aDsu({
     default:
       derA = ax; lejosA = ay; derG = gx; lejosG = gy;
   }
-  return Movimiento(derA / g, az / g, -lejosA / g, derG, gz, -lejosG);
+  // Probado en JADYX (21-nov-2026): con los ejes "directos" el control 3D salía
+  // mirando hacia el otro lado y había que voltear el celular (cámaras hacia uno)
+  // para verlo de frente. Voltear el celular es girarlo 180° sobre su eje
+  // vertical de pantalla: cambia el signo de "derecha" y de "fuera de la
+  // pantalla". Lo hacemos aquí para que el celular se use normal.
+  return Movimiento(-derA / g, -az / g, -lejosA / g, -derG, -gz, -lejosG);
 }

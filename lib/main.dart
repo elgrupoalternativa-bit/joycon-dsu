@@ -60,14 +60,14 @@ class PantallaControl extends StatelessWidget {
             ModoControl.joyconDerecho => JoyconDeLado(app: app, izquierdo: false),
           };
           final vertical = MediaQuery.of(context).orientation == Orientation.portrait;
-          return SafeArea(
-            child: Stack(children: [
-              Padding(padding: const EdgeInsets.all(6), child: control),
-              Align(alignment: Alignment.topCenter, child: _Estado(app: app)),
-              if (!app.arrancado) _Empezar(app: app),
-              if (app.arrancado && vertical && ControlApp.esWeb) const _Gira(),
-            ]),
-          );
+          // El control va de borde a borde (las carcasas ya dejan margen para la
+          // isla o el notch); solo los avisos respetan el área segura.
+          return Stack(children: [
+            Padding(padding: const EdgeInsets.all(4), child: control),
+            SafeArea(child: Align(alignment: Alignment.topCenter, child: _Estado(app: app))),
+            if (!app.arrancado) SafeArea(child: _Empezar(app: app)),
+            if (app.arrancado && vertical && ControlApp.esWeb) const SafeArea(child: _Gira()),
+          ]);
         },
       ),
     );
@@ -80,8 +80,8 @@ class _Pantallita extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 46,
-      margin: const EdgeInsets.symmetric(horizontal: 4),
+      width: 18,
+      margin: const EdgeInsets.symmetric(horizontal: 3),
       decoration: BoxDecoration(
         color: const Color(0xFF050506),
         borderRadius: BorderRadius.circular(10),
